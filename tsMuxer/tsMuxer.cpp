@@ -52,6 +52,21 @@ static const int PAT_PID = 0;
 static const int SIT_PID = 0x1f;
 static const int NULL_PID = 8191;
 
+namespace {
+    bool isValidCustomPID(int pid) {
+        switch(pid) {
+        case PAT_PID:
+        case SIT_PID:
+        case DEFAULT_PCR_PID:
+        case DEFAULT_PMT_PID:
+        case NULL_PID:
+            return false;
+        default:
+            return pid > 0 && pid < NULL_PID;
+        }
+    }
+}
+
 uint8_t DefaultSitTableOne[] = {
     0x47, 0x40, 0x1f, 0x10, 0x00, 0x7f, 0xf0, 0x19, 0xff, 0xff, 0xc1, 0x00, 0x00, 0xf0, 0x0a, 0x63, 0x08, 0xc1, 0x5a,
     0xae, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x01, 0x80, 0x00, 0x34, 0x1e, 0xe7, 0x4e, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -177,56 +192,11 @@ void TSMuxer::intAddStream(const std::string& streamName, const std::string& cod
     if (itr != params.end())
         lang = itr->second;
 
-    int tsStreamIndex = streamIndex + 16;
     bool isSecondary = codecReader->isSecondary();
 
-    if (codecName[0] == 'V')
-    {
-        if (!isSecondary)
-        {
-            int doubleMux = (m_subMode || m_masterMode) ? 2 : 1;
-            if (codecReader->getStreamHDR() == 4)
-            {
-                tsStreamIndex = 0x1015 + m_DVvideoTrackCnt * doubleMux;
-                m_DVvideoTrackCnt++;
-            }
-            else
-            {
-                tsStreamIndex = 0x1011 + m_videoTrackCnt * doubleMux;
-                m_videoTrackCnt++;
-                V3_flags |= BASE_LAYER;
-            }
-            if (m_subMode)
-                tsStreamIndex++;
-        }
-        else
-        {
-            tsStreamIndex = 0x1B00 + m_videoSecondTrackCnt;
-            m_videoSecondTrackCnt++;
-        }
-    }
-    else if (codecName[0] == 'A')
-    {
-        if (isSecondary)
-        {
-            tsStreamIndex = 0x1A00 + m_secondaryAudioTrackCnt;
-            m_secondaryAudioTrackCnt++;
-        }
-        else
-        {
-            tsStreamIndex = 0x1100 + m_audioTrackCnt;
-            m_audioTrackCnt++;
-        }
-    }
-    else if (codecName == "S_HDMV/PGS")
-    {
-        tsStreamIndex = (V3_flags & 0x1e ? 0x12A0 : 0x1200) + m_pgsTrackCnt;
-        m_pgsTrackCnt++;
-    }
-    else if (codecName == "S_TEXT/UTF8")
-    {
-        tsStreamIndex = (V3_flags & 0x1e ? 0x12A0 : 0x1200) + m_pgsTrackCnt;
-        m_pgsTrackCnt++;
+    int tsStreamIndex = getStreamPID(codecName, streamIndex, params, codecReader, isSecondary);
+    if (auto streamCounterPtr = getStreamCounter(codecName, isSecondary)) {
+        ++(*streamCounterPtr);
     }
     m_extIndexToTSIndex[streamIndex] = tsStreamIndex;
 
@@ -418,6 +388,74 @@ bool TSMuxer::doFlush()
         }
     }
     return doFlush(newPCR, 0);
+}
+
+int TSMuxer::getStreamPID(const std::string& codecName, int streamIndex, const map<string, string>& params,
+                          AbstractStreamReader* codecReader, bool isSecondary)
+{
+    int tsStreamIndex = streamIndex + 16;
+    if (codecName[0] == 'V')
+    {
+        if (!isSecondary)
+        {
+            int doubleMux = (m_subMode || m_masterMode) ? 2 : 1;
+            int HDR = codecReader->getStreamHDR();
+            if (HDR == 4)
+            {
+                tsStreamIndex = 0x1015 + m_DVvideoTrackCnt * doubleMux;
+                m_DVvideoTrackCnt++;
+            }
+            else
+            {
+                tsStreamIndex = 0x1011 + m_videoTrackCnt * doubleMux;
+                m_videoTrackCnt++;
+            }
+            if (m_subMode)
+                tsStreamIndex++;
+        }
+        else
+        {
+            tsStreamIndex = 0x1B00 + m_videoSecondTrackCnt;
+            m_videoSecondTrackCnt++;
+        }
+    }
+    else if (codecName[0] == 'A')
+    {
+        if (isSecondary)
+        {
+            tsStreamIndex = 0x1A00 + m_secondaryAudioTrackCnt;
+            m_secondaryAudioTrackCnt++;
+        }
+        else
+        {
+            tsStreamIndex = 0x1100 + m_audioTrackCnt;
+            m_audioTrackCnt++;
+        }
+    }
+    else if (codecName == "S_HDMV/PGS")
+    {
+        tsStreamIndex = (V3_flags & 0x1e ? 0x12A0 : 0x1200) + m_pgsTrackCnt;
+        m_pgsTrackCnt++;
+    }
+    else if (codecName == "S_TEXT/UTF8")
+    {
+        tsStreamIndex = (V3_flags & 0x1e ? 0x12A0 : 0x1200) + m_pgsTrackCnt;
+        m_pgsTrackCnt++;
+    }
+    return tsStreamIndex;
+}
+
+
+int* TSMuxer::getStreamCounter(const string &codecName, bool isSecondary)
+{
+    if (codecName[0] == 'V') {
+        return isSecondary ? &m_videoSecondTrackCnt : &m_videoTrackCnt;
+    } else if (codecName[0] == 'A') {
+        return isSecondary ? &m_secondaryAudioTrackCnt : &m_audioTrackCnt;
+    } else if (codecName == "S_HDMV/PGS" || codecName == "S_TEXT/UTF8") {
+        return &m_pgsTrackCnt;
+    }
+    return nullptr;
 }
 
 bool TSMuxer::doFlush(uint64_t newPCR, int64_t pcrGAP)

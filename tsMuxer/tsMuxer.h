@@ -69,7 +69,10 @@ class TSMuxer : public AbstractMuxer
     bool isSubStream() const { return m_subMode; }
 
     void setPtsOffset(int64_t value);
-
+    int getStreamPID(const std::string& codecName, int streamIndex,
+                     const std::map<std::string, std::string>& params,
+                     AbstractStreamReader* codecReader, bool isSecondary);
+    int* getStreamCounter(const std::string& codecName, bool isSecondary);
    protected:
     bool muxPacket(AVPacket& avPacket) override;
     virtual void internalReset();

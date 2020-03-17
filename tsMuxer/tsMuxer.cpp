@@ -393,6 +393,18 @@ bool TSMuxer::doFlush()
 int TSMuxer::getStreamPID(const std::string& codecName, int streamIndex, const map<string, string>& params,
                           AbstractStreamReader* codecReader, bool isSecondary)
 {
+    auto explicitPID = params.find("pid");
+    if (explicitPID != std::end(params)) {
+        try {
+            auto pid = std::stoi(explicitPID->second, nullptr, 0);
+            if (isValidCustomPID(pid) ||
+                (codecName[0] == 'V' && pid == DEFAULT_PCR_PID && m_pcrOnVideo)) {
+                return pid;
+            }
+        } catch (const std::exception &e) {}
+        LTRACE(LT_INFO, 2, codecName << ": invalid PID value of " <<
+                                     explicitPID->second << ", falling back to defaults.");
+    }
     int tsStreamIndex = streamIndex + 16;
     if (codecName[0] == 'V')
     {
